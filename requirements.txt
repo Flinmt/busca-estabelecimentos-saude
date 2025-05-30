@@ -1,6 +1,12 @@
-streamlit
-pandas
-requests
-python-dotenv
-sqlalchemy
-psycopg2-binary
+# Interface web
+streamlit>=1.30.0
+
+# Conexão com BigQuery usando autenticação com service account
+google-cloud-bigquery>=3.17.0
+google-auth>=2.23.0
+
+# Manipulação de JSON (nativo, mas necessário se quiser usar features extra)
+python-dotenv>=1.0.1
+
+# Pandas para análise e exibição de dados
+pandas>=2.2.0
