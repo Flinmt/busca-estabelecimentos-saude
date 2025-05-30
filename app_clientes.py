@@ -1,25 +1,26 @@
 import streamlit as st
-import requests
-from dotenv import load_dotenv
-import os
 import json
 from google.oauth2 import service_account
 from pandas_gbq import read_gbq
 
 # Configurações
-load_dotenv()
 st.set_page_config(page_title="Busca CNES", layout="wide")
 
 # Conexão com o BigQuery
 @st.cache_resource
 def get_credentials():
-    if os.getenv("GCP_CREDENTIALS"):
-        creds_dict = json.loads(os.getenv("GCP_CREDENTIALS"))
+    if "GCP_CREDENTIALS" in st.secrets:
+        creds_dict = json.loads(st.secrets["GCP_CREDENTIALS"])
         return service_account.Credentials.from_service_account_info(creds_dict)
     else:
-        return service_account.Credentials.from_service_account_file(
-            os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
-        )
+        st.error("Credenciais GCP não encontradas em st.secrets.")
+        st.stop()
+
+# Exemplo de uso
+def carregar_dados(query):
+    credentials = get_credentials()
+    df = read_gbq(query, credentials=credentials, project_id=credentials.project_id)
+    return df
 
 # Consulta paginada com filtros
 @st.cache_data(ttl=600)
