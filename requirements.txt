@@ -10,3 +10,6 @@ python-dotenv>=1.0.1
 
 # Pandas para análise e exibição de dados
 pandas>=2.2.0
+
+# Leitura do BigQuery via pandas
+pandas-gbq>=0.19.2
