@@ -1,25 +1,69 @@
 import streamlit as st
-import pandas as pd
 import requests
-from sqlalchemy import create_engine
 from dotenv import load_dotenv
 import os
+import json
+from google.oauth2 import service_account
+from pandas_gbq import read_gbq
 
 # Configurações
 load_dotenv()
 st.set_page_config(page_title="Busca CNES", layout="wide")
 
-# Conexão com o Neon
+# Conexão com o BigQuery
 @st.cache_resource
-def get_db():
-    return create_engine(os.getenv("NEON_DB_URL"))
+def get_credentials():
+    if os.getenv("GCP_CREDENTIALS"):
+        creds_dict = json.loads(os.getenv("GCP_CREDENTIALS"))
+        return service_account.Credentials.from_service_account_info(creds_dict)
+    else:
+        return service_account.Credentials.from_service_account_file(
+            os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+        )
 
-# Função auxiliar para buscar dados do banco
-@st.cache_data(ttl=60)
-def get_data():
-    return pd.read_sql("SELECT * FROM estabelecimentos_saude", get_db())
+# Consulta paginada com filtros
+@st.cache_data(ttl=600)
+def get_data(estado=None, municipio=None, pagina=1, limite=100):
+    offset = (pagina - 1) * limite
 
-# API CNES (Dados públicos do Ministério da Saúde)
+    where_clauses = []
+    if estado:
+        where_clauses.append(f"estado = '{estado}'")
+    if municipio:
+        where_clauses.append(f"municipio = '{municipio}'")
+
+    where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+
+    query = f"""
+        SELECT * 
+        FROM `bigquery3cx.estabelecimentos_saude.estabelecimentos_saude`
+        {where_sql}
+        ORDER BY estado
+        LIMIT {limite}
+        OFFSET {offset}
+    """
+    return read_gbq(query, credentials=get_credentials())
+
+# Contagem total de linhas para paginação
+@st.cache_data(ttl=600)
+def get_total_rows(estado=None, municipio=None):
+    where_clauses = []
+    if estado:
+        where_clauses.append(f"estado = '{estado}'")
+    if municipio:
+        where_clauses.append(f"municipio = '{municipio}'")
+
+    where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+
+    query = f"""
+        SELECT COUNT(*) as total 
+        FROM `bigquery3cx.estabelecimentos_saude.estabelecimentos_saude`
+        {where_sql}
+    """
+    df = read_gbq(query, credentials=get_credentials())
+    return int(df["total"].iloc[0])
+
+# API CNES
 def buscar_por_cnes(cnes):
     url = f"https://apidadosabertos.saude.gov.br/cnes/estabelecimentos/{cnes}"
     try:
@@ -35,19 +79,28 @@ tab1, tab2 = st.tabs(["Banco de Dados", "API CNES"])
 # --- ABA 1: Banco de Dados ---
 with tab1:
     st.header("Filtrar no Banco de Dados")
-    df = get_data()
+
+    # Carrega estado e município para dropdowns
+    df_estados_municipios = read_gbq(
+        """
+        SELECT DISTINCT estado, municipio
+        FROM `bigquery3cx.estabelecimentos_saude.estabelecimentos_saude`
+        WHERE estado IS NOT NULL AND municipio IS NOT NULL
+        """,
+        credentials=get_credentials()
+    )
 
     col1, col2 = st.columns(2)
 
     with col1:
         estado = st.selectbox(
             "Estado",
-            options=[""] + sorted(df['estado'].dropna().unique()),
+            options=[""] + sorted(df_estados_municipios['estado'].dropna().unique()),
             index=0
         )
 
     with col2:
-        municipios = df[df['estado'] == estado]['municipio'].dropna().unique() if estado else []
+        municipios = df_estados_municipios[df_estados_municipios['estado'] == estado]['municipio'].dropna().unique() if estado else []
         municipio = st.selectbox(
             "Município",
             options=[""] + sorted(municipios) if estado else [],
@@ -55,32 +108,21 @@ with tab1:
             index=0
         )
 
-    # Filtragem
-    df_filtrado = df.copy()
-    if estado:
-        df_filtrado = df_filtrado[df_filtrado['estado'] == estado]
-        if municipio:
-            df_filtrado = df_filtrado[df_filtrado['municipio'] == municipio]
-
-    # Paginação
+    total_linhas = get_total_rows(estado, municipio)
     linhas_por_pagina = 100
-    total_linhas = len(df_filtrado)
     total_paginas = (total_linhas // linhas_por_pagina) + int(total_linhas % linhas_por_pagina > 0)
 
     pagina = st.number_input("Página", min_value=1, max_value=max(total_paginas, 1), step=1, value=1)
 
-    inicio = (pagina - 1) * linhas_por_pagina
-    fim = inicio + linhas_por_pagina
-    df_paginado = df_filtrado.iloc[inicio:fim]
+    df_paginado = get_data(estado, municipio, pagina=pagina, limite=linhas_por_pagina)
 
-    st.write(f"Exibindo {inicio + 1} a {min(fim, total_linhas)} de {total_linhas} registros")
-
+    st.write(f"Exibindo {((pagina - 1) * linhas_por_pagina + 1)} a {min(pagina * linhas_por_pagina, total_linhas)} de {total_linhas} registros")
     st.dataframe(df_paginado, use_container_width=True)
 
 # --- ABA 2: API CNES ---
 with tab2:
     st.header("Consultar CNES Direto na API")
-    cnes = st.text_input("Digite o código CNES:", placeholder="Ex: 1234567")
+    cnes = st.text_input("Digite o código CNES:", placeholder="Ex: 1234567", key="cnes_input_unique")
 
     if cnes:
         if cnes.isdigit():
@@ -113,9 +155,8 @@ with tab2:
                     st.write(f"**Possui Atendimento Hospitalar:** {'Sim' if dados.get('estabelecimento_possui_atendimento_hospitalar') == 1 else 'Não'}")
                     st.write(f"**Possui Serviço de Apoio:** {'Sim' if dados.get('estabelecimento_possui_servico_apoio') == 1 else 'Não'}")
                     st.write(f"**Possui Atendimento Ambulatorial:** {'Sim' if dados.get('estabelecimento_possui_atendimento_ambulatorial') == 1 else 'Não'}")
-                    st.write(f"**Atualizado em:** {dados.get('data_atualizacao')}")    
+                    st.write(f"**Atualizado em:** {dados.get('data_atualizacao')}")
             else:
                 st.error("CNES não encontrado ou erro na API.")
         else:
             st.warning("Digite apenas números no campo CNES.")
-
