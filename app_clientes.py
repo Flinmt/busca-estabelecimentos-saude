@@ -62,7 +62,20 @@ with tab1:
         if municipio:
             df_filtrado = df_filtrado[df_filtrado['municipio'] == municipio]
 
-    st.dataframe(df_filtrado, use_container_width=True)
+    # Paginação
+    linhas_por_pagina = 100
+    total_linhas = len(df_filtrado)
+    total_paginas = (total_linhas // linhas_por_pagina) + int(total_linhas % linhas_por_pagina > 0)
+
+    pagina = st.number_input("Página", min_value=1, max_value=max(total_paginas, 1), step=1, value=1)
+
+    inicio = (pagina - 1) * linhas_por_pagina
+    fim = inicio + linhas_por_pagina
+    df_paginado = df_filtrado.iloc[inicio:fim]
+
+    st.write(f"Exibindo {inicio + 1} a {min(fim, total_linhas)} de {total_linhas} registros")
+
+    st.dataframe(df_paginado, use_container_width=True)
 
 # --- ABA 2: API CNES ---
 with tab2:
