@@ -13,3 +13,6 @@ pandas>=2.2.0
 
 # Leitura do BigQuery via pandas
 pandas-gbq>=0.19.2
+
+# Requisições para API
+requests>=2.31.0
