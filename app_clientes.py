@@ -17,15 +17,9 @@ def get_credentials():
         st.error("Credenciais GCP não encontradas em st.secrets.")
         st.stop()
 
-# Exemplo de uso
-def carregar_dados(query):
-    credentials = get_credentials()
-    df = read_gbq(query, credentials=credentials, project_id=credentials.project_id)
-    return df
-
 # Consulta paginada com filtros
 @st.cache_data(ttl=600)
-def get_data(estado=None, municipio=None, pagina=1, limite=100):
+def get_data(estado=None, municipio=None, fantasia=None, pagina=1, limite=100):
     offset = (pagina - 1) * limite
 
     where_clauses = []
@@ -33,6 +27,8 @@ def get_data(estado=None, municipio=None, pagina=1, limite=100):
         where_clauses.append(f"estado = '{estado}'")
     if municipio:
         where_clauses.append(f"municipio = '{municipio}'")
+    if fantasia:
+        where_clauses.append(f"LOWER(fantasia) LIKE '%{fantasia.lower()}%'")
 
     where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
 
@@ -48,12 +44,14 @@ def get_data(estado=None, municipio=None, pagina=1, limite=100):
 
 # Contagem total de linhas para paginação
 @st.cache_data(ttl=600)
-def get_total_rows(estado=None, municipio=None):
+def get_total_rows(estado=None, municipio=None, fantasia=None):
     where_clauses = []
     if estado:
         where_clauses.append(f"estado = '{estado}'")
     if municipio:
         where_clauses.append(f"municipio = '{municipio}'")
+    if fantasia:
+        where_clauses.append(f"LOWER(fantasia) LIKE '%{fantasia.lower()}%'")
 
     where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
 
@@ -91,6 +89,9 @@ with tab1:
         """,
         credentials=get_credentials()
     )
+    
+    # Campo de busca por nome fantasia
+    fantasia = st.text_input("🔎 Buscar por Nome Fantasia", placeholder="Ex: Hospital Vida Saudável")
 
     col1, col2 = st.columns(2)
 
@@ -110,13 +111,13 @@ with tab1:
             index=0
         )
 
-    total_linhas = get_total_rows(estado, municipio)
+    total_linhas = get_total_rows(estado, municipio, fantasia)
     linhas_por_pagina = 100
     total_paginas = (total_linhas // linhas_por_pagina) + int(total_linhas % linhas_por_pagina > 0)
 
     pagina = st.number_input("Página", min_value=1, max_value=max(total_paginas, 1), step=1, value=1)
 
-    df_paginado = get_data(estado, municipio, pagina=pagina, limite=linhas_por_pagina)
+    df_paginado = get_data(estado, municipio, fantasia, pagina=pagina, limite=linhas_por_pagina)
 
     st.write(f"Exibindo {((pagina - 1) * linhas_por_pagina + 1)} a {min(pagina * linhas_por_pagina, total_linhas)} de {total_linhas} registros")
     st.dataframe(df_paginado, use_container_width=True)
