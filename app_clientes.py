@@ -3,6 +3,8 @@ import streamlit as st
 import json
 from google.oauth2 import service_account
 from pandas_gbq import read_gbq
+import io
+import pandas as pd
 
 # Configurações
 st.set_page_config(page_title="Busca CNES", layout="wide")
@@ -115,12 +117,56 @@ with tab1:
     linhas_por_pagina = 100
     total_paginas = (total_linhas // linhas_por_pagina) + int(total_linhas % linhas_por_pagina > 0)
 
-    pagina = st.number_input("Página", min_value=1, max_value=max(total_paginas, 1), step=1, value=1)
+    # Definimos a página aqui (sem exibir ainda)
+    pagina = st.session_state.get("pagina", 1)
+    pagina = max(1, min(pagina, total_paginas))  # Limita ao intervalo válido
 
+    # Busca os dados com base na página
     df_paginado = get_data(estado, municipio, fantasia, pagina=pagina, limite=linhas_por_pagina)
 
+    # Exibe a tabela
     st.write(f"Exibindo {((pagina - 1) * linhas_por_pagina + 1)} a {min(pagina * linhas_por_pagina, total_linhas)} de {total_linhas} registros")
     st.dataframe(df_paginado, use_container_width=True)
+    
+    # Paginação abaixo da tabela
+    pagina = st.number_input("Página", min_value=1, max_value=max(total_paginas, 1), step=1, value=pagina, key="pagina")
+    
+    # Botão para baixar todos os registros filtrados em Excel
+    def get_all_data(estado=None, municipio=None, fantasia=None):
+        where_clauses = []
+        if estado:
+            where_clauses.append(f"estado = '{estado}'")
+        if municipio:
+            where_clauses.append(f"municipio = '{municipio}'")
+        if fantasia:
+            where_clauses.append(f"LOWER(fantasia) LIKE '%{fantasia.lower()}%'")
+
+        where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+
+        query = f"""
+            SELECT * 
+            FROM `bigquery3cx.estabelecimentos_saude.estabelecimentos_saude`
+            {where_sql}
+            ORDER BY estado
+        """
+        return read_gbq(query, credentials=get_credentials())
+
+    if st.button("⬇️ Preparar todos os registros filtrados para baixar como Excel"):
+        with st.spinner("Preparando arquivo para download... Pode levar alguns segundos."):
+            df_all = get_all_data(estado, municipio, fantasia)
+
+            # Cria buffer Excel em memória
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                df_all.to_excel(writer, index=False, sheet_name='Estabelecimentos')
+            data = output.getvalue()
+
+            st.download_button(
+                label="Clique aqui para baixar o Excel",
+                data=data,
+                file_name="estabelecimentos_filtrados.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
 
 # --- ABA 2: API CNES ---
 with tab2:
