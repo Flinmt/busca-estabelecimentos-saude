@@ -16,3 +16,6 @@ pandas-gbq>=0.19.2
 
 # Requisições para API
 requests>=2.31.0
+
+# Excel writer para exportar arquivos XLSX
+XlsxWriter>=3.1.2
